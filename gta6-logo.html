@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GTA VI — 3D ASCII Logo Animasyonu</title>
+  <style>
+    html, body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: #06040d;
+      user-select: none;
+    }
+
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="screen" role="img"
+    aria-label="Siyah Vice City arka planı üzerinde ortadan dışarı doğru yumuşakça açılan 3 boyutlu ASCII GTA VI logosu">
+  </canvas>
+
+  <script type="module">
+    const canvas = document.querySelector('#screen');
+    const ctx = canvas.getContext('2d');
+    const motion = matchMedia('(prefers-reduced-motion: reduce)');
+    const tau = Math.PI * 2;
+
+    // Goz yormayan yumusak Vice City gun batimi paleti
+    const sunsetStops = [
+      [130, 58, 196],  // Yumusak mor (alt)
+      [219, 76, 148],  // Pastel neon pembe
+      [235, 124, 98],  // Sicak mercan
+      [242, 194, 114], // Yumusak altin (ust)
+      [252, 232, 186]  // Acik sampanya
+    ];
+    const sideColors = ['#241142', '#3d1c6e', '#5d2b99', '#3f7ea6'];
+    const starColors = ['#28203d', '#483b66', '#7b68a3', '#bbaad9'];
+    const palmDark = '#180c29';
+    const palmEdge = '#b84b86';
+    const chars = 'x+oOX';
+
+    let width, height, unit, columnWidth, rowHeight, columns, rows, centerY;
+    let depth, marks, colors;
+    let turnCos = 1, turnSin = 0;
+    let tiltCos = 1, tiltSin = 0;
+    let seed = 6062026;
+    let start = performance.now();
+    let lastFrame = -Infinity;
+
+    function random() {
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+      return seed / 4294967296;
+    }
+
+    function clamp01(v) {
+      return Math.max(0, Math.min(1, v));
+    }
+
+    function ease(value) {
+      const t = clamp01(value);
+      return t * t * (3 - 2 * t);
+    }
+
+    function lerp(a, b, t) {
+      return a + (b - a) * t;
+    }
+
+    function sunsetColor(t, sheen = 0) {
+      const u = clamp01(t) * (sunsetStops.length - 1);
+      const i = Math.min(sunsetStops.length - 2, Math.floor(u));
+      const f = u - i;
+      const a = sunsetStops[i];
+      const b = sunsetStops[i + 1];
+      const r0 = lerp(a[0], b[0], f);
+      const g0 = lerp(a[1], b[1], f);
+      const b0 = lerp(a[2], b[2], f);
+      const r = Math.round(r0 + (255 - r0) * sheen * 0.45);
+      const g = Math.round(g0 + (242 - g0) * sheen * 0.45);
+      const bl = Math.round(b0 + (230 - b0) * sheen * 0.45);
+      return `rgb(${r},${g},${bl})`;
+    }
+
+    // 1. 3D "VI" geometrisi (ortadan disariya dogru yumusakca ilerler)
+    function insideVI(x, y) {
+      if (y < -25 || y > 25) return false;
+      const t = (y + 25) / 50;
+
+      const vLeftCenter = lerp(-15.5, -34.5, t);
+      const vRightCenter = lerp(-12.5, 6.5, t);
+      const halfW = 5.4;
+      const inVLeft = Math.abs(x - vLeftCenter) <= halfW && x >= -41 && x <= -4;
+      const inVRight = Math.abs(x - vRightCenter) <= halfW && x >= -20 && x <= 13;
+      const inVTip = y <= -16 && Math.abs(x - (-14)) <= lerp(4.2, 10.5, (y + 25) / 9);
+
+      const inIBody = Math.abs(x - 26.5) <= 5.6;
+      const inISerif = (y > 20.5 || y < -20.5) && Math.abs(x - 26.5) <= 10.2;
+
+      return inVLeft || inVRight || inVTip || inIBody || inISerif;
+    }
+
+    const viFront = [];
+    const viSides = [];
+
+    for (let y = -25; y <= 25; y += 0.85) {
+      for (let x = -41; x <= 38; x += 0.85) {
+        if (!insideVI(x, y)) continue;
+        const t = (y + 25) / 50;
+        const dist = Math.hypot(x, y);
+        const normDist = clamp01(dist / 48);
+        const isEdge =
+          !insideVI(x - 0.95, y) || !insideVI(x + 0.95, y) ||
+          !insideVI(x, y - 0.95) || !insideVI(x, y + 0.95);
+
+        const delay = 0.25 + normDist * 1.9 + random() * 0.2;
+        const swirl = (random() - 0.5) * 0.65;
+
+        viFront.push({
+          x, y, z: 2.5, t, dist, delay, swirl,
+          mark: isEdge ? '+' : chars[Math.floor(random() * chars.length)],
+          isEdge
+        });
+
+        if (isEdge) {
+          for (let z = -6.0; z <= 1.6; z += 1.25) {
+            viSides.push({
+              x, y, z, t, dist, delay: delay + 0.1, swirl,
+              shade: (z + 6.0) / 7.8,
+              mark: z < -2.5 ? ':' : '+'
+            });
+          }
+        }
+      }
+    }
+
+    // 2. Onde duran 3D "GRAND THEFT AUTO" harfleri (ortadan yanlara dogru sakince dizilir)
+    const FONT = {
+      A: [' 111 ', '1   1', '11111', '1   1', '1   1'],
+      D: ['1111 ', '1   1', '1   1', '1   1', '1111 '],
+      E: ['11111', '1    ', '1111 ', '1    ', '11111'],
+      F: ['11111', '1    ', '1111 ', '1    ', '1    '],
+      G: [' 1111', '1    ', '1  11', '1   1', ' 1111'],
+      H: ['1   1', '1   1', '11111', '1   1', '1   1'],
+      N: ['1   1', '11  1', '1 1 1', '1  11', '1   1'],
+      O: [' 111 ', '1   1', '1   1', '1   1', ' 111 '],
+      R: ['1111 ', '1   1', '1111 ', '1  1 ', '1   1'],
+      T: ['11111', '  1  ', '  1  ', '  1  ', '  1  '],
+      U: ['1   1', '1   1', '1   1', '1   1', ' 111 ']
+    };
+
+    const titlePts = [];
+    function buildTitleWord(word, yCenter, cellX, cellY, zFront, wordDelay) {
+      const totalCols = word.length * 6 - 1;
+      const startX = -(totalCols * cellX) / 2;
+      for (let wi = 0; wi < word.length; wi++) {
+        const glyph = FONT[word[wi]];
+        if (!glyph) continue;
+        const centerDist = Math.abs(wi - (word.length - 1) / 2);
+        const charDelay = wordDelay + centerDist * 0.16;
+        for (let r = 0; r < 5; r++) {
+          for (let c = 0; c < 5; c++) {
+            if (glyph[r][c] !== '1') continue;
+            const bx = startX + (wi * 6 + c) * cellX;
+            const by = yCenter + (2 - r) * cellY;
+            for (const ox of [-cellX * 0.72, 0, cellX * 0.72]) {
+              for (const oy of [-cellY * 0.68, 0, cellY * 0.68]) {
+                if (ox === 0 && oy === 0) continue;
+                titlePts.push({ x: bx + ox, y: by + oy, z: zFront - 1.2, delay: charDelay, shadow: true });
+              }
+            }
+            for (const dx of [-cellX * 0.26, cellX * 0.26]) {
+              for (const dy of [-cellY * 0.24, cellY * 0.24]) {
+                titlePts.push({ x: bx + dx, y: by + dy, z: zFront, delay: charDelay, shadow: false });
+              }
+            }
+          }
+        }
+      }
+    }
+
+    buildTitleWord('GRAND',  9.2, 1.48, 1.75, 8.2, 2.8);
+    buildTitleWord('THEFT', -1.2, 1.48, 1.75, 8.2, 3.2);
+    buildTitleWord('AUTO', -11.6, 1.48, 1.75, 8.2, 3.6);
+
+    // 3. Yavas yildizlar ve sakin suzulen toz/isilti parcaciklari
+    const stars = Array.from({ length: 140 }, () => ({
+      x: random(),
+      y: random() * 0.74,
+      speed: 0.001 + random() * 0.003,
+      phase: random() * tau,
+      shade: Math.floor(random() * starColors.length)
+    }));
+
+    const embers = Array.from({ length: 48 }, () => ({
+      x: -52 + random() * 104,
+      y: -34 + random() * 68,
+      z: -12 + random() * 20,
+      vy: 1.4 + random() * 2.4,
+      phase: random() * tau,
+      color: random() > 0.5 ? '#c76ca6' : '#7398c4'
+    }));
+
+    function resize() {
+      width = Math.max(1, canvas.clientWidth);
+      height = Math.max(1, canvas.clientHeight);
+      const ratio = Math.min(devicePixelRatio || 1, 2);
+
+      canvas.width = Math.round(width * ratio);
+      canvas.height = Math.round(height * ratio);
+      ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+
+      unit = Math.min(width / 118, height / 88);
+      centerY = height * 0.49;
+      const font = Math.max(2, Math.min(unit * 0.96, 13));
+
+      ctx.font = `bold ${font}px monospace`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+
+      columnWidth = Math.max(ctx.measureText('M').width, font * 0.66);
+      rowHeight = font * 1.05;
+      columns = Math.ceil(width / columnWidth);
+      rows = Math.ceil(height / rowHeight);
+
+      depth = new Float32Array(columns * rows);
+      marks = new Array(columns * rows);
+      colors = new Array(columns * rows);
+      lastFrame = -Infinity;
+    }
+
+    function put(x, y, z, mark, color) {
+      const col = Math.floor(x / columnWidth);
+      const row = Math.floor(y / rowHeight);
+      if (col < 0 || row < 0 || col >= columns || row >= rows) return;
+
+      const index = row * columns + col;
+      if (z < depth[index]) return;
+
+      depth[index] = z;
+      marks[index] = mark;
+      colors[index] = color;
+    }
+
+    function project(x, y, z, mark, color) {
+      const x1 = x * turnCos - z * turnSin;
+      const z1 = x * turnSin + z * turnCos;
+
+      const y2 = y * tiltCos - z1 * tiltSin;
+      const front = y * tiltSin + z1 * tiltCos;
+
+      const scale = 1 + front * 0.0055;
+      put(
+        width / 2 + x1 * scale * unit,
+        centerY - y2 * scale * unit,
+        front,
+        mark,
+        color
+      );
+    }
+
+    function drawStars(time) {
+      for (const s of stars) {
+        const x = ((s.x + time * s.speed) % 1) * width;
+        const y = s.y * height;
+        put(x, y, -120, '.', starColors[s.shade]);
+      }
+    }
+
+    function drawSunsetDisc(time) {
+      const reveal = ease((time - 0.15) / 2.0);
+      if (reveal <= 0.02) return;
+
+      const rMax = 29 * reveal;
+      for (let y = -rMax; y <= rMax; y += 1.4) {
+        if (y < -2 && Math.sin(y * 1.35) < -0.25) continue;
+        const span = Math.sqrt(Math.max(0, rMax * rMax - y * y));
+        const t = (y + 30) / 60;
+        const col = sunsetColor(t * 0.72, 0);
+        for (let x = -span; x <= span; x += 1.6) {
+          put(width / 2 + x * unit, centerY - (y + 2) * unit, -40, '.', col);
+        }
+      }
+    }
+
+    function drawViceGrid(time) {
+      const scroll = (time * 3.2) % 6;
+      for (let gz = 0; gz < 44; gz += 4.5) {
+        const z = gz - scroll;
+        if (z < 1) continue;
+        const py = centerY + (22 + 240 / (z + 6)) * unit * 0.28;
+        if (py > height) continue;
+        const col = z < 16 ? '#3b6c8c' : (z < 30 ? '#4d2b73' : '#261440');
+        for (let gx = -56; gx <= 56; gx += 3.6) {
+          const px = width / 2 + (gx * 24 / (z + 8)) * unit;
+          put(px, py, -30 - z * 0.2, '.', col);
+        }
+      }
+    }
+
+    function drawPalmTree(baseX, baseY, lean, zPos, time, reveal) {
+      if (reveal <= 0.05) return;
+      const sway = Math.sin(time * 0.8 + baseX * 0.1) * 1.1;
+      const trunkH = 38 * reveal;
+
+      let topX = baseX, topY = baseY;
+      for (let i = 0; i <= 26; i++) {
+        const t = i / 26;
+        const y = baseY + t * trunkH;
+        const curve = Math.sin(t * 1.3) * lean + t * t * sway;
+        const x = baseX + curve;
+        const w = lerp(1.7, 0.75, t);
+        for (let dx = -w; dx <= w; dx += 0.85) {
+          project(x + dx, y, zPos, Math.abs(dx) > w - 0.5 ? '|' : '#', dx > 0 ? '#3b1957' : palmDark);
+        }
+        topX = x;
+        topY = y;
+      }
+
+      if (reveal > 0.65) {
+        const frondScale = ease((reveal - 0.65) / 0.35);
+        const angles = [-2.5, -1.9, -1.2, -0.5, 0.2, 0.9, 1.6];
+        for (const a0 of angles) {
+          const ang = a0 + sway * 0.04;
+          const len = 14.5 * frondScale;
+          for (let s = 1; s <= 12; s++) {
+            const ft = s / 12;
+            const fx = topX + Math.cos(ang) * len * ft;
+            const fy = topY + Math.sin(ang) * len * ft - ft * ft * 6.5;
+            const col = ft > 0.72 ? palmEdge : (ft > 0.35 ? '#592499' : '#211038');
+            project(fx, fy, zPos + 0.5, ft > 0.65 ? '+' : '.', col);
+          }
+        }
+      }
+    }
+
+    // Ortadan baslayip yumusakca disariya ilerleyerek olusan 3D VI
+    function drawVI(time) {
+      // Yavas, goz yormayan capraz isik suzulmesi (6.5 saniyede bir)
+      const glintCycle = (time - 4.0) % 6.5;
+      const glintPos = glintCycle >= 0 && glintCycle < 1.8 ? lerp(-55, 55, glintCycle / 1.8) : -999;
+
+      for (const p of viSides) {
+        const raw = (time - p.delay) / 1.25;
+        if (raw <= 0) continue;
+        const prog = ease(raw);
+        const spin = (1 - prog) * p.swirl;
+        const cs = Math.cos(spin), sn = Math.sin(spin);
+        const px = (p.x * cs - p.y * sn) * prog;
+        const py = (p.x * sn + p.y * cs) * prog;
+        const pz = lerp(-12, p.z, prog);
+
+        const colIdx = Math.min(sideColors.length - 1, Math.floor(p.shade * sideColors.length));
+        project(px, py, pz, p.mark, sideColors[colIdx]);
+      }
+
+      for (const p of viFront) {
+        const raw = (time - p.delay) / 1.25;
+        if (raw <= 0) continue;
+        const prog = ease(raw);
+        const spin = (1 - prog) * p.swirl;
+        const cs = Math.cos(spin), sn = Math.sin(spin);
+        const px = (p.x * cs - p.y * sn) * prog;
+        const py = (p.x * sn + p.y * cs) * prog;
+        const pz = lerp(-10, p.z, prog);
+
+        const diag = p.x * 0.75 + p.y * 0.65;
+        const glint = raw >= 1 ? Math.max(0, 1 - Math.abs(diag - glintPos) / 10) : 0;
+        const travelGlow = (1 - prog) * 0.5;
+        const color = p.isEdge && glint < 0.25 ? '#e08cc4' : sunsetColor(p.t, Math.max(glint, travelGlow));
+        project(px, py, pz, p.mark, color);
+      }
+    }
+
+    // "GRAND THEFT AUTO" harfleri ortadan kenarlara dogru yumusakca dizilir
+    function drawTitle(time) {
+      for (const pt of titlePts) {
+        const raw = (time - pt.delay) / 1.05;
+        if (raw <= 0) continue;
+        const prog = ease(raw);
+        const px = pt.x * prog;
+        const py = pt.y * prog;
+        const pz = lerp(-10, pt.z, prog);
+
+        if (pt.shadow) {
+          if (prog > 0.7) project(px, py, pz, ' ', '#06040d');
+        } else {
+          project(px, py, pz, '@', prog < 0.85 ? '#d8c8eb' : '#f2edf7');
+        }
+      }
+    }
+
+    function drawEmbers(time) {
+      for (const e of embers) {
+        const y = ((e.y + time * e.vy + 36) % 72) - 36;
+        const x = e.x + Math.sin(time * 0.7 + e.phase) * 1.6;
+        project(x, y, e.z, '.', e.color);
+      }
+    }
+
+    function render(time) {
+      depth.fill(-Infinity);
+      marks.fill('');
+
+      // Sadece yavas ve sakin otomatik 3D salinim (fareyle oynamaz)
+      const rotY = Math.sin(time * 0.36) * 0.22;
+      const rotX = Math.cos(time * 0.24) * 0.04;
+      turnCos = Math.cos(rotY);
+      turnSin = Math.sin(rotY);
+      tiltCos = Math.cos(rotX);
+      tiltSin = Math.sin(rotX);
+
+      const palmReveal = ease((time - 1.5) / 2.2);
+
+      drawStars(time);
+      drawSunsetDisc(time);
+      drawViceGrid(time);
+      drawPalmTree(-45, -24, -7.5, -9, time, palmReveal);
+      drawPalmTree( 46, -24,  7.5, -9, time, palmReveal);
+      drawVI(time);
+      drawTitle(time);
+      drawEmbers(time);
+
+      ctx.fillStyle = '#06040d';
+      ctx.fillRect(0, 0, width, height);
+
+      for (let i = 0; i < marks.length; i++) {
+        if (!marks[i]) continue;
+        ctx.fillStyle = colors[i];
+        ctx.fillText(
+          marks[i],
+          ((i % columns) + 0.5) * columnWidth,
+          (Math.floor(i / columns) + 0.5) * rowHeight
+        );
+      }
+
+      const subAlpha = ease((time - 4.4) / 0.9);
+      if (subAlpha > 0.01) {
+        ctx.globalAlpha = subAlpha;
+        ctx.fillStyle = '#d98ec4';
+        ctx.fillText(
+          'V I C E   C I T Y   •   G T A   V I',
+          width / 2,
+          centerY + unit * 34,
+          width * 0.9
+        );
+        ctx.globalAlpha = 1;
+      }
+    }
+
+    function restart() {
+      start = performance.now();
+      lastFrame = -Infinity;
+    }
+
+    function animate(now) {
+      const still = motion.matches;
+      if (lastFrame === -Infinity || (!still && now - lastFrame >= 32)) {
+        render(still ? 6.0 : Math.max(0, (now - start) / 1000));
+        lastFrame = now;
+      }
+      requestAnimationFrame(animate);
+    }
+
+    addEventListener('resize', resize);
+    addEventListener('keydown', event => {
+      if (event.key.toLowerCase() === 'r') restart();
+    });
+    canvas.addEventListener('click', restart);
+    motion.addEventListener('change', restart);
+
+    resize();
+    render(motion.matches ? 6.0 : 0);
+    requestAnimationFrame(animate);
+  </script>
+</body>
+</html>
